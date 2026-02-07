@@ -1,0 +1,30 @@
+{
+  "os": ["Browser"],
+  "languages": ["JavaScript"],
+  "features": {
+    "mythic": [
+      "browser scripts",
+      "dynamic loading",
+      "file chunking",
+      "keylogging",
+      "screenshots"
+    ],
+    "custom": [
+      "xss",
+      "browser agent",
+      "mqtt websockets",
+      "clipboard",
+      "dom extraction",
+      "form grabbing",
+      "service worker persistence",
+      "port scanning",
+      "phishing ui"
+    ]
+  },
+  "payload_output": ["js", "base64"],
+  "architectures": ["any"],
+  "c2": ["mqtt"],
+  "mythic_version": "",
+  "agent_version": "",
+  "supported_wrappers": []
+}
