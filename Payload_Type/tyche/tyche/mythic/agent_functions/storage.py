@@ -21,7 +21,7 @@ class StorageCommand(CommandBase):
     attackmapping = ["T1539", "T1005"]
     argument_class = StorageArguments
     attributes = CommandAttributes(
-        supported_os=[SupportedOS.MacOS, SupportedOS.Linux, SupportedOS.Windows]
+        supported_os=[SupportedOS("Browser")]
     )
 
     async def create_tasking(self, task: MythicTask) -> MythicTask:

@@ -38,7 +38,7 @@ class KeyloggerCommand(CommandBase):
     attackmapping = ["T1056.001"]
     argument_class = KeyloggerArguments
     attributes = CommandAttributes(
-        supported_os=[SupportedOS.MacOS, SupportedOS.Linux, SupportedOS.Windows]
+        supported_os=[SupportedOS("Browser")]
     )
 
     async def create_tasking(self, task: MythicTask) -> MythicTask:

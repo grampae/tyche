@@ -47,7 +47,7 @@ class PhishCommand(CommandBase):
     attackmapping = ["T1056.002"]
     argument_class = PhishArguments
     attributes = CommandAttributes(
-        supported_os=[SupportedOS.MacOS, SupportedOS.Linux, SupportedOS.Windows]
+        supported_os=[SupportedOS("Browser")]
     )
 
     async def create_tasking(self, task: MythicTask) -> MythicTask:

@@ -53,7 +53,7 @@ class PostUrlCommand(CommandBase):
     attackmapping = ["T1090", "T1552.005"]
     argument_class = PostUrlArguments
     attributes = CommandAttributes(
-        supported_os=[SupportedOS.MacOS, SupportedOS.Linux, SupportedOS.Windows]
+        supported_os=[SupportedOS("Browser")]
     )
 
     async def create_tasking(self, task: MythicTask) -> MythicTask:

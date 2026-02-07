@@ -21,7 +21,7 @@ class DomExtractCommand(CommandBase):
     attackmapping = ["T1005", "T1213"]
     argument_class = DomExtractArguments
     attributes = CommandAttributes(
-        supported_os=[SupportedOS.MacOS, SupportedOS.Linux, SupportedOS.Windows]
+        supported_os=[SupportedOS("Browser")]
     )
 
     async def create_tasking(self, task: MythicTask) -> MythicTask:

