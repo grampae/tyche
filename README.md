@@ -11,13 +11,13 @@ To install Tyche, you'll need Mythic installed on a remote computer.
 From the Mythic install directory, use the following command to install Tyche as the **root** user:
 
 ```
-./mythic-cli install github https://github.com/MythicAgents/tyche.git
+./mythic-cli install github https://github.com/grampae/tyche.git
 ```
 
 From the Mythic install directory, use the following command to install Tyche as a **non-root** user:
 
 ```
-sudo -E ./mythic-cli install github https://github.com/MythicAgents/tyche.git
+sudo -E ./mythic-cli install github https://github.com/grampae/tyche.git
 ```
 
 Once installed, restart Mythic to build a new agent.
