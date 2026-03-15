@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.0.0 — 2026-03-15
 
 ### Fixed
 - `pendingResponse` concurrency bug — Replaced single-slot callback with a keyed map (`pendingResponses`). Multiple simultaneous file downloads no longer cause tasks to hang.
