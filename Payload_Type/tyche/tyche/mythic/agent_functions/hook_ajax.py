@@ -32,11 +32,12 @@ class HookAjaxCommand(CommandBase):
     cmd = "hook_ajax"
     needs_admin = False
     help_cmd = "hook_ajax"
-    description = "Intercept all XMLHttpRequest and fetch calls for a specified duration. Captures request method, URL, headers, body, and response previews."
-    version = 1
+    description = "Intercept all browser network traffic (XHR, fetch, WebSocket, postMessage) for a specified duration. Auto-detects available APIs and hooks everything. Captures request/response metadata, headers, bodies, and message previews."
+    version = 2
     author = "@grampae"
     attackmapping = ["T1557"]
     argument_class = HookAjaxArguments
+    browser_script = BrowserScript(script_name="hook_ajax", author="@grampae", for_new_ui=True)
     attributes = CommandAttributes(
         supported_os=[SupportedOS("Browser")]
     )

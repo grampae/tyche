@@ -30,7 +30,7 @@ class IframeCommand(CommandBase):
     needs_admin = False
     help_cmd = "iframe https://example.com"
     description = "Overlay the current page with a full-screen iframe pointing to the specified URL. Useful for phishing or credential harvesting during assessments."
-    version = 1
+    version = 2
     author = "@grampae"
     attackmapping = ["T1185"]
     argument_class = IframeArguments
@@ -45,4 +45,15 @@ class IframeCommand(CommandBase):
 
     async def process_response(self, task: PTTaskMessageAllData, response: any) -> PTTaskProcessResponseMessageResponse:
         resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
+
+        # Register artifact for the iframe overlay
+        try:
+            await SendMythicRPCArtifactCreate(MythicRPCArtifactCreateMessage(
+                TaskID=task.Task.ID,
+                ArtifactMessage="Full-page iframe overlay created",
+                BaseArtifactType="DOM Modification"
+            ))
+        except Exception:
+            pass
+
         return resp

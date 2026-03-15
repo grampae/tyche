@@ -44,4 +44,19 @@ class InjectScriptCommand(CommandBase):
 
     async def process_response(self, task: PTTaskMessageAllData, response: any) -> PTTaskProcessResponseMessageResponse:
         resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
+
+        # Register artifact for the injected script
+        try:
+            import json
+            params = json.loads(task.Task.Params)
+            url = params.get("url", "")
+            if url:
+                await SendMythicRPCArtifactCreate(MythicRPCArtifactCreateMessage(
+                    TaskID=task.Task.ID,
+                    ArtifactMessage="Injected <script> tag: {}".format(url),
+                    BaseArtifactType="URL Loaded"
+                ))
+        except Exception:
+            pass
+
         return resp

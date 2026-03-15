@@ -1,8 +1,5 @@
 COMMANDS['portscan'] = async function(task) {
-    var params = task.parameters;
-    if (typeof params === 'string') {
-        try { params = JSON.parse(params); } catch (e) { params = {}; }
-    }
+    var params = parseParams(task);
     var targets = (params && params.targets) ? params.targets : '127.0.0.1';
     var ports = (params && params.ports) ? params.ports : '80,443,8080,8443,3000,3389,5900,22,21,25,8000,8888,9090';
     var timeout = (params && params.timeout) ? parseInt(params.timeout) : 2000;

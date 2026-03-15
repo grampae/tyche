@@ -36,4 +36,4 @@ keylogger {"duration":120}
 
 ## Detailed Summary
 
-Installs a keydown listener and records keystrokes along with field focus changes. Output includes a structured list of events and a human-readable text stream.
+Installs a keydown listener and records keystrokes along with field focus changes. Output includes a structured list of events and a human-readable text stream. Captured keystrokes are automatically stored in Mythic's Keylogs, grouped by focused field (input element). Registers as a background task — can be viewed and cancelled early via the `jobs` command.

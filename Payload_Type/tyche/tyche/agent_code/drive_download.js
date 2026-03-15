@@ -1,8 +1,5 @@
 COMMANDS['drive_download'] = async function(task) {
-    var params = task.parameters;
-    if (typeof params === 'string') {
-        try { params = JSON.parse(params); } catch (e) { params = {}; }
-    }
+    var params = parseParams(task);
     var url = (params && params.url) ? params.url : '';
     var filename = (params && params.filename) ? params.filename : '';
     if (!url) return 'error: url parameter required';

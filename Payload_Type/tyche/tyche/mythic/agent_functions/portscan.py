@@ -55,6 +55,7 @@ class PortscanCommand(CommandBase):
     author = "@grampae"
     attackmapping = ["T1046"]
     argument_class = PortscanArguments
+    browser_script = BrowserScript(script_name="portscan", author="@grampae", for_new_ui=True)
     attributes = CommandAttributes(
         supported_os=[SupportedOS("Browser")]
     )
@@ -67,4 +68,20 @@ class PortscanCommand(CommandBase):
 
     async def process_response(self, task: PTTaskMessageAllData, response: any) -> PTTaskProcessResponseMessageResponse:
         resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
+
+        try:
+            import json
+            data = json.loads(response)
+            targets = data.get("targets", [])
+            open_count = sum(1 for r in data.get("results", []) if r.get("state") == "open")
+            await SendMythicRPCArtifactCreate(MythicRPCArtifactCreateMessage(
+                TaskID=task.Task.ID,
+                ArtifactMessage="Port scan: {} host(s), {} open port(s) found".format(
+                    len(targets) if isinstance(targets, list) else 1, open_count
+                ),
+                BaseArtifactType="Network Scan"
+            ))
+        except Exception:
+            pass
+
         return resp

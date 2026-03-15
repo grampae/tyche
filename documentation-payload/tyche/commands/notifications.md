@@ -60,4 +60,6 @@ notifications {"title":"System Alert","body":"Click to review.","url":"https://e
 
 ## Detailed Summary
 
-Uses the browser Notification API. If permission is not yet granted, the browser will prompt the user. Optionally opens a URL when the notification is clicked.
+Uses the browser Notification API. Optionally opens a URL when the notification is clicked.
+
+**Permission handling:** Browsers require a user gesture (click) to request notification permission. If permission hasn't been granted yet, the command waits silently for the victim's next click anywhere on the page, then requests permission inside that click event. The task will appear to hang in Mythic until the victim clicks — this is expected. If permission is already `granted`, notifications fire immediately. If already `denied`, the command returns an error with the permission state.

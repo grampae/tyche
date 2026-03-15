@@ -43,4 +43,4 @@ media_record {"duration":15,"type":"video"}
 
 ## Detailed Summary
 
-Uses `getUserMedia` and `MediaRecorder` to capture audio and/or video, then uploads a WebM file to Mythic. This command typically prompts the user for microphone and/or camera access.
+Uses `getUserMedia` and `MediaRecorder` to capture audio and/or video, then uploads a WebM file to Mythic. This command typically prompts the user for microphone and/or camera access. If the browser permission prompt is ignored, the command will time out after 30 seconds and return an error rather than hanging indefinitely.

